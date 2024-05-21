@@ -6,6 +6,12 @@ from django.urls import reverse_lazy
 from django.contrib.auth.views import LoginView, LogoutView
 from django.views import View
 from django.shortcuts import redirect
+from django.contrib.auth.forms import PasswordChangeForm
+from django.contrib.auth import update_session_auth_hash
+from django.contrib import messages
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
 
 class UserRegistrationView(FormView):
     template_name = 'accounts/user_registration.html'
@@ -47,4 +53,28 @@ class UserBankAccountUpdateView(View):
         return render(request, self.template_name, {'form': form})
     
     
-    
+
+def pass_change(request):
+    if request.method == 'POST':
+        form = PasswordChangeForm(request.user, data=request.POST)
+        if form.is_valid():
+            user = form.save()
+            update_session_auth_hash(request, user)
+            send_password_change_email(request.user)
+            messages.success(request, 'Password Updated Successfully')
+            return redirect('profile')
+        else:
+            print(form.errors)  # Debugging form errors
+            messages.error(request, 'Please correct the error below.')
+    else:
+        form = PasswordChangeForm(user=request.user)
+    return render(request, 'accounts/pass_change.html', {'form': form})
+
+def send_password_change_email(user):
+    subject = "Password Changed Notification"
+    template = 'accounts/password_change_email.html'
+    message = render_to_string(template, {'user': user})
+    plain_message = strip_tags(message)
+    send_email = EmailMultiAlternatives(subject, plain_message, to=[user.email])
+    send_email.attach_alternative(message, "text/html")
+    send_email.send()

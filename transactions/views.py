@@ -11,6 +11,12 @@ from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.template.loader import render_to_string
 from datetime import datetime
 from django.db.models import Sum
+from accounts.models import UserBankAccount
+from django.shortcuts import render
+from decimal import Decimal
+from .models import Bankrupt
+
+
 
 from transactions.forms import (
     DepositForm,
@@ -18,14 +24,15 @@ from transactions.forms import (
     LoanRequestForm,
 )
 
-def send_transaction_email(user, amount, subject, template):
-        message = render_to_string(template, {
-            'user' : user,
-            'amount' : amount,
-        })
-        send_email = EmailMultiAlternatives(subject, '', to=[user.email])
-        send_email.attach_alternative(message, "text/html")
-        send_email.send()
+def send_transaction_email(user, amount, subject, template, sender=True):
+    message = render_to_string(template, {
+        'user': user,
+        'amount': amount,
+        'sender': sender,
+    })
+    send_email = EmailMultiAlternatives(subject, '', to=[user.email])
+    send_email.attach_alternative(message, "text/html")
+    send_email.send()
 
 
 from transactions.models import Transaction
@@ -90,20 +97,25 @@ class WithdrawMoneyView(TransactionCreateMixin):
         return initial
 
     def form_valid(self, form):
-        amount = form.cleaned_data.get('amount')
 
-        self.request.user.account.balance -= form.cleaned_data.get('amount')
-        # balance = 300
-        # amount = 5000
-        self.request.user.account.save(update_fields=['balance'])
+        if Bankrupt.is_bankrupt():
+            messages.error(self.request, 'The bank is currently bankrupt. Withdrawals are not allowed.')
+            return redirect('home')  # Redirect the user to the home page or any appropriate URL
+        else:
+            amount = form.cleaned_data.get('amount')
 
-        messages.success(
-            self.request,
-            f'Successfully withdrawn {"{:,.2f}".format(float(amount))}$ from your account'
-        )
-        send_transaction_email(self.request.user, amount, "Withdrawal Message", "transactions/withdrawal_email.html")
+            self.request.user.account.balance -= form.cleaned_data.get('amount')
+            # balance = 300
+            # amount = 5000
+            self.request.user.account.save(update_fields=['balance'])
 
-        return super().form_valid(form)
+            messages.success(
+                self.request,
+                f'Successfully withdrawn {"{:,.2f}".format(float(amount))}$ from your account'
+            )
+            send_transaction_email(self.request.user, amount, "Withdrawal Message", "transactions/withdrawal_email.html")
+
+            return super().form_valid(form)
 
 class LoanRequestView(TransactionCreateMixin):
     form_class = LoanRequestForm
@@ -114,17 +126,22 @@ class LoanRequestView(TransactionCreateMixin):
         return initial
 
     def form_valid(self, form):
-        amount = form.cleaned_data.get('amount')
-        current_loan_count = Transaction.objects.filter(
-            account=self.request.user.account, transaction_type=LOAN
-        ).count()
-        
-        if current_loan_count >= 3:
-            messages.error(
-                self.request,
-                "You have already made three loan requests. You cannot make another loan request at this time."
-            )
-            return self.form_invalid(form)
+
+        if Bankrupt.is_bankrupt():
+            messages.error(self.request, 'The bank is currently bankrupt. Loan requests are not allowed.')
+            return redirect('home')  # Redirect the user to the home page or any appropriate URL
+        else:
+            amount = form.cleaned_data.get('amount')
+            current_loan_count = Transaction.objects.filter(
+                account=self.request.user.account, transaction_type=LOAN
+            ).count()
+            
+            if current_loan_count >= 3:
+                messages.error(
+                    self.request,
+                    "You have already made three loan requests. You cannot make another loan request at this time."
+                )
+                return self.form_invalid(form)
         
         # If the user has not made three loan requests, proceed with the form submission
         messages.success(
@@ -207,3 +224,72 @@ class LoanListView(LoginRequiredMixin,ListView):
         queryset = Transaction.objects.filter(account=user_account,transaction_type=3)
         print(queryset)
         return queryset
+
+
+# def transfer_money(request):
+#     if request.method == 'POST':
+#         if Bankrupt.is_bankrupt():
+#             messages.error(request, 'The bank is currently bankrupt. Transfers are not allowed.')
+#             return redirect('home')  # Redirect the user to the home page or any appropriate URL
+        
+#         sender_account = request.user.account
+#         receiver_account_id = request.POST.get('receiver_account_id')
+        
+#         try:
+#             receiver_account = UserBankAccount.objects.get(id=receiver_account_id)
+#             amount_str = request.POST.get('amount')
+#             amount = Decimal(amount_str)  # Convert amount to Decimal
+            
+#             transaction = Transaction()
+#             success = transaction.transfer(sender_account, receiver_account, amount)
+
+#             if success:
+#                 messages.success(request, 'Amount transferred successfully.')
+#             else:
+#                 messages.error(request, 'Transfer failed. Insufficient balance.')
+#         except UserBankAccount.DoesNotExist:
+#             messages.error(request, 'Receiver account not found.')
+
+#         return redirect('transfer_money')
+#     else:
+#         # If it's not a POST request, render the transfer money template with account details
+#         accounts = UserBankAccount.objects.all()
+#         return render(request, 'transactions/transfer_money.html', {'accounts': accounts})
+
+
+
+def transfer_money(request):
+    if request.method == 'POST':
+        if Bankrupt.is_bankrupt():
+            messages.error(request, 'The bank is currently bankrupt. Transfers are not allowed.')
+            return redirect('home')  # Redirect the user to the home page or any appropriate URL
+        
+        sender_account = request.user.account
+        receiver_account_id = request.POST.get('receiver_account_id')
+        
+        try:
+            receiver_account = UserBankAccount.objects.get(id=receiver_account_id)
+            amount_str = request.POST.get('amount')
+            amount = Decimal(amount_str)  # Convert amount to Decimal
+            
+            transaction = Transaction()
+            success = transaction.transfer(sender_account, receiver_account, amount)
+
+            if success:
+                # Send email to sender
+                send_transaction_email(sender_account.user, amount, "Transaction Notification", "transactions/transaction_email.html", sender=True)
+                
+                # Send email to receiver
+                send_transaction_email(receiver_account.user, amount, "Transaction Notification", "transactions/transaction_email.html", sender=False)
+                
+                messages.success(request, 'Amount transferred successfully.')
+            else:
+                messages.error(request, 'Transfer failed. Insufficient balance.')
+        except UserBankAccount.DoesNotExist:
+            messages.error(request, 'Receiver account not found.')
+
+        return redirect('transfer_money')
+    else:
+        # If it's not a POST request, render the transfer money template with account details
+        accounts = UserBankAccount.objects.all()
+        return render(request, 'transactions/transfer_money.html', {'accounts': accounts})

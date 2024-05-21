@@ -1,0 +1,10 @@
+
+<h3>Hello {{ user.first_name }} {{ user.last_name }}</h3>
+{% if sender %}
+<p>Your Transfer request for ${{ amount }} has been successfully completed. After the Transfer, your total balance is ${{ user.account.balance }}.</p>
+{% else %}
+<p>You have received a transaction of ${{ amount }}. After the transaction, your total balance is ${{ user.account.balance }}.</p>
+{% endif %}
+<p>Thanks for banking with us</p>
+<p>Mamar Bank</p>
+

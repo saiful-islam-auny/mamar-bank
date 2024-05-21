@@ -1,4 +1,5 @@
 {% extends 'base.html' %} {% load static %} {% block head_title %}Banking System{% endblock %} {% block content %} {% if form.non_field_errors %} {% for error in form.non_field_errors %}
+
 <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mt-2" role="alert">
     <p class="font-bold">Error!</p>
     <p class="block sm:inline">{{ error }}</p>
@@ -118,6 +119,9 @@
                 <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
                     Update
                 </button>
+                <a class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" href="{% url 'pass_change' %}">
+                    Change Your Password
+                </a>
             </div>
         </form>
     </div>
